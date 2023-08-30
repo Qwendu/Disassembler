@@ -1,0 +1,3 @@
+[submodule "jai-zydis"]
+	path = jai-zydis
+	url = https://github.com/Qwendu/jai-zydis

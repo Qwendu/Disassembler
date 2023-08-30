@@ -3,9 +3,11 @@
 
 Plugin :: struct
 {
-	using #as plug : Jai.Metaprogram_Plugin;
+	using #as base : Jai.Metaprogram_Plugin;
 
 	procedures_to_disassemble : [..] Disassembled_Procedure;
+	assembly_files : [..] string;
+	base_folder : string;
 }
 
 Disassembled_Procedure :: struct
@@ -13,10 +15,18 @@ Disassembled_Procedure :: struct
 	name : string;
 	symbol_name : string;
 	file_of_definition : string;
-	runtime_address : int;
+	runtime_address : u64;
 	binary : [] u8;
 	disassembled : [] Zydis.DisassembledInstruction;
+	file_index : int = -1;
+	labels : [] Label;
 }
+
+Label :: struct
+{
+	address : u64;
+	name : string;
+};
 
 
 
@@ -25,6 +35,8 @@ get_plugin :: () -> *Jai.Metaprogram_Plugin
 	plug := New(Plugin);
 	plug.message = xx message;
 	plug.finish = xx finish;
+	
+	array_add(*plug.assembly_files, "all.asm");
 
 	return plug;
 }
@@ -37,14 +49,26 @@ get_plugin :: () -> *Jai.Metaprogram_Plugin
 
 finish :: (using plugin : *Plugin)
 {
+	builders := NewArray(assembly_files.count, String_Builder);
+
 	for * proc : procedures_to_disassemble
 	{
 		if proc.binary.data
 		{
 			log("Function % [%]:", proc.name, proc.symbol_name);
 			log("'Runtime address' = 0x%", formatInt(proc.runtime_address, base=16));
+
+
 			continue_disassembly := true;
 			{
+				labels : [..] Label;
+				defer proc.labels = labels;
+				array_add(*labels, .{
+					address = proc.runtime_address,
+					name    = proc.name, 
+				});
+
+
 				str : [] u8;
 				str.data  = proc.binary.data;
 				str.count = proc.binary.count;
@@ -53,7 +77,7 @@ finish :: (using plugin : *Plugin)
 				instr_idx := 0;
 				while true
 				{
-					defer if disassembled_up_to - proc.runtime_address >= proc.binary.count  break;
+					defer if disassembled_up_to >= cast(u64)proc.binary.count  + proc.runtime_address  break;
 					succ, instr := Zydis.DisassembleIntel(.LONG_64, xx disassembled_up_to, str);
 					if succ != 0 && succ != 0x100000
 					{
@@ -65,11 +89,11 @@ finish :: (using plugin : *Plugin)
 
 					meta := instr.info.meta;
 
-					// TODO: recognize jumps
 					is_jump, jump_address := is_Jump(instr);
 					if is_jump
 					{
 						highest_jump_to = max(jump_address, highest_jump_to);
+						array_add(*labels, .{address = jump_address});
 					}
 
 					instr_idx += 1;
@@ -83,16 +107,19 @@ finish :: (using plugin : *Plugin)
 						if highest_jump_to < disassembled_up_to
 						{
 							log("Found return of function at +% [% instructions]", disassembled_up_to - proc.runtime_address, instr_idx);
-							proc.binary.count = disassembled_up_to;
+							proc.binary.count = xx disassembled_up_to;
 							proc.disassembled = NewArray(instr_idx, Zydis.DisassembledInstruction);
 							break;
 						}
 					}
 				}
 			}
-
-			if !continue_disassembly  continue;
-
+			quick_sort(proc.labels,  a => a.address);
+			if !continue_disassembly 
+			{
+				log_error("Zydis failed to disasseble procedure %", proc.name);
+				continue;
+			}
 			{
 				addr := proc.runtime_address;
 				data := proc.binary;
@@ -103,14 +130,44 @@ finish :: (using plugin : *Plugin)
 					data.data  += instr.info.length;
 					data.count -= instr.info.length;
 				}
+			}
+	
+			{
+				log("Formatting %", proc.name);
+				label_index := 0;
+				builder := *builders[proc.file_index];
+
 				for instr : proc.disassembled
 				{
+					for label_index..proc.labels.count-1
+					{
+						if proc.labels[it].address == instr.runtime_address
+						{
+							if proc.labels[it].name  append(builder, proc.labels[it].name);
+							else print_to_builder(builder, "label_%", formatInt(proc.labels[it].address,base=16));
+							append(builder, ":\n");
+						}
+					}
 					log("%: %", formatInt(instr.runtime_address,base=16), to_string(instr.text));
+					append(builder, "\t");
+					append(builder, Zydis.GetInstructionString(instr));
+					append(builder, "\n");
 				}
+				append(builder, "\n\n");
 			}
 		}else{
 			log_error("Could not find a binary for procedure %. Skipping", proc.name);
 		}
+	}
+
+	
+	for *builders
+	{
+		file_path := tprint("%/%", base_folder, assembly_files[it_index]);
+		log("Outputting %", file_path);
+		str := builder_to_string(it);
+		log("builder:\n%", str);
+		write_entire_file(file_path, str);
 	}
 }
 
@@ -126,11 +183,17 @@ message :: (using plugin : *Plugin, msg : *Jai.Message)
 			{
 				for note : it.expression.notes
 				{
-					if note.text == "Disassemble"
+					found, dis_note, file_name := split_from_left(note.text, #char "(");
+					file_name.count -= 1;
+					file_index := ifx found then get_Asm_File(plugin, file_name) else 0;
+					if dis_note == "Disassemble"
 					{
-						array_add(*procedures_to_disassemble, .{name = it.expression.name});
-						log("Processing procedure %", it.expression.name);
-						break it;
+						array_add(*procedures_to_disassemble, .{
+							name = it.expression.name,
+							file_index = file_index
+						});
+						log("Processing procedure %, putting it in file %", it.expression.name, file_name);
+						break note;
 					}
 
 				}
@@ -145,6 +208,7 @@ message :: (using plugin : *Plugin, msg : *Jai.Message)
 				if postcomp.phase != .POST_WRITE_EXECUTABLE  break;
 				
 				build_options := Jai.get_build_options(plugin.workspace);
+				base_folder    = build_options.intermediate_path;
 				
 				for coff_file_name : postcomp.compiler_generated_object_files
 				{
@@ -195,6 +259,16 @@ message :: (using plugin : *Plugin, msg : *Jai.Message)
 	}
 }
 
+get_Asm_File :: (using plugin : *Plugin, file_name : string) -> int
+{
+	for assembly_files
+	{
+		if it == file_name  return it_index;
+	}
+	array_add(*assembly_files, file_name);
+	return assembly_files.count - 1;
+}
+
 should_disassemble :: (plugin : *Plugin, name : string) -> bool, int
 {
 	for plugin.procedures_to_disassemble
@@ -207,7 +281,7 @@ should_disassemble :: (plugin : *Plugin, name : string) -> bool, int
 	return false, -1;
 }
 
-is_Jump :: (instr : Zydis.DisassembledInstruction) -> bool, int
+is_Jump :: (instr : Zydis.DisassembledInstruction) -> bool, u64
 {
 	if instr.info.mnemonic ==
 	{
@@ -249,10 +323,10 @@ is_Jump :: (instr : Zydis.DisassembledInstruction) -> bool, int
 	{
 		if op.imm.is_relative
 		{
-			return true, (cast(s64)instr.runtime_address) + instr.info.length + op.imm.value.s;
+			return true, cast(u64)(cast(s64)instr.runtime_address + instr.info.length + op.imm.value.s);
 		}else{
 			assert(false, "Hardcoding immediate jumps?");
-			return true, op.imm.value.s;
+			return true, op.imm.value.u;
 		}
 	}
 	
@@ -269,3 +343,5 @@ Jai :: #import "Compiler";
 #import "executable_formats";
 #import "String";
 Zydis :: #import,dir "jai-zydis";
+#import "File";
+#import "Sort";

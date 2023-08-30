@@ -5,10 +5,28 @@ foo :: () -> int
 {
 	a := 3;
 	b := 4;
-	a += b * 2;
+	if a > 3
+	{
+		a += b * 2;
+	}
 	
 	return b - a;
-} @Disassemble
+} @Disassemble(foo.asm)
+
+bar :: () -> int
+{
+	a := 3;
+	b := 4;
+	while true
+	{
+		if a > 3
+		{
+			a += b * 2;
+		}
+	}
+	
+	return b - a;
+} @Disassemble(foo.asm)
 
 
 main :: ()
