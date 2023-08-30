@@ -55,17 +55,13 @@ finish :: (using plugin : *Plugin)
 	{
 		if proc.binary.data
 		{
-			log("Function % [%]:", proc.name, proc.symbol_name);
-			log("'Runtime address' = 0x%", formatInt(proc.runtime_address, base=16));
-
-
 			continue_disassembly := true;
 			{
 				labels : [..] Label;
 				defer proc.labels = labels;
 				array_add(*labels, .{
 					address = proc.runtime_address,
-					name    = proc.name, 
+					name    = proc.symbol_name, 
 				});
 
 
@@ -93,7 +89,7 @@ finish :: (using plugin : *Plugin)
 					if is_jump
 					{
 						highest_jump_to = max(jump_address, highest_jump_to);
-						array_add(*labels, .{address = jump_address});
+						array_add(*labels, .{address = jump_address, name = tprint("%p%", proc.symbol_name, jump_address - proc.runtime_address)});
 					}
 
 					instr_idx += 1;
@@ -106,7 +102,7 @@ finish :: (using plugin : *Plugin)
 					{
 						if highest_jump_to < disassembled_up_to
 						{
-							log("Found return of function at +% [% instructions]", disassembled_up_to - proc.runtime_address, instr_idx);
+							//log("Found return of function % at +% [% instructions]", proc.symbol_name, disassembled_up_to - proc.runtime_address, instr_idx);
 							proc.binary.count = xx disassembled_up_to;
 							proc.disassembled = NewArray(instr_idx, Zydis.DisassembledInstruction);
 							break;
@@ -114,12 +110,16 @@ finish :: (using plugin : *Plugin)
 					}
 				}
 			}
-			quick_sort(proc.labels,  a => a.address);
+
+
 			if !continue_disassembly 
 			{
 				log_error("Zydis failed to disasseble procedure %", proc.name);
 				continue;
 			}
+
+			quick_sort(proc.labels,  a => a.address);
+
 			{
 				addr := proc.runtime_address;
 				data := proc.binary;
@@ -133,24 +133,38 @@ finish :: (using plugin : *Plugin)
 			}
 	
 			{
-				log("Formatting %", proc.name);
+				log("Disassembling % into %", proc.name, assembly_files[proc.file_index]);
 				label_index := 0;
 				builder := *builders[proc.file_index];
-
+				append(builder, "# Function ");
+				append(builder, proc.name);
+				append(builder, "\n");
 				for instr : proc.disassembled
 				{
-					for label_index..proc.labels.count-1
+					for proc.labels
 					{
-						if proc.labels[it].address == instr.runtime_address
+						if it.address == instr.runtime_address
 						{
-							if proc.labels[it].name  append(builder, proc.labels[it].name);
-							else print_to_builder(builder, "label_%", formatInt(proc.labels[it].address,base=16));
+							if it.name  append(builder, it.name);
+							else print_to_builder(builder, "%p%", proc.symbol_name ,formatInt(it.address - proc.runtime_address,base=16));
 							append(builder, ":\n");
 						}
 					}
-					log("%: %", formatInt(instr.runtime_address,base=16), to_string(instr.text));
+					//log("%: %", formatInt(instr.runtime_address,base=16), to_string(instr.text));
 					append(builder, "\t");
-					append(builder, Zydis.GetInstructionString(instr));
+					is_Jump, jump_addr := is_Jump(instr);
+					if !is_Jump  append(builder, Zydis.GetInstructionString(instr));
+					else{
+						instr_string := Zydis.GetInstructionString(instr);
+						found, instr, rest := split_from_left(instr_string, #char " ");
+						assert(found);
+						append(builder, instr);
+						append(builder, " ");
+						for proc.labels
+						{
+							if it.address == jump_addr  {append(builder, it.name); break;}
+						}
+					}
 					append(builder, "\n");
 				}
 				append(builder, "\n\n");
@@ -164,10 +178,7 @@ finish :: (using plugin : *Plugin)
 	for *builders
 	{
 		file_path := tprint("%/%", base_folder, assembly_files[it_index]);
-		log("Outputting %", file_path);
-		str := builder_to_string(it);
-		log("builder:\n%", str);
-		write_entire_file(file_path, str);
+		write_entire_file(file_path,it, do_reset = true);
 	}
 }
 
@@ -192,7 +203,7 @@ message :: (using plugin : *Plugin, msg : *Jai.Message)
 							name = it.expression.name,
 							file_index = file_index
 						});
-						log("Processing procedure %, putting it in file %", it.expression.name, file_name);
+						log("Disassembling procedure %, putting it in file %", it.expression.name, file_name);
 						break note;
 					}
 
