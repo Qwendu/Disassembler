@@ -29,6 +29,11 @@ bar :: () -> int
 } @Disassemble(foo.asm)
 
 
+baz :: () -> int
+{
+	return 3;
+} @Disassemble
+
 main :: ()
 {
 	res := foo();
