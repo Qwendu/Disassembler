@@ -1,6 +1,8 @@
 #scope_export
 #module_parameters(ENABLE :bool = true);
 
+REPORT :: false;
+
 Plugin :: struct
 {
 	using #as base : Jai.Metaprogram_Plugin;
@@ -49,12 +51,15 @@ get_plugin :: () -> *Jai.Metaprogram_Plugin
 
 finish :: (using plugin : *Plugin)
 {
+	if REPORT  log("Diassembler:");
 	builders := NewArray(assembly_files.count, String_Builder);
+	defer free(builders.data);
 
 	for * proc : procedures_to_disassemble
 	{
 		if proc.binary.data
 		{
+			defer free(proc.labels.data);
 			continue_disassembly := true;
 			{
 				labels : [..] Label;
@@ -150,7 +155,7 @@ finish :: (using plugin : *Plugin)
 			}
 	
 			{
-				log("Disassembling % into %", proc.name, assembly_files[proc.file_index]);
+				if REPORT  log("\tDisassembling % into %", proc.name, assembly_files[proc.file_index]);
 				label_index := 0;
 				builder := *builders[proc.file_index];
 				append(builder, "# Function ");
@@ -209,9 +214,6 @@ finish :: (using plugin : *Plugin)
 				}
 				continue;
 			}
-			
-
-
 			write_entire_file(file_path,it, do_reset = true);
 		}
 	}
@@ -238,7 +240,6 @@ message :: (using plugin : *Plugin, msg : *Jai.Message)
 							name = it.expression.name,
 							file_index = file_index
 						});
-						log("Disassembling procedure %, putting it in file %", it.expression.name, assembly_files[file_index]);
 						break note;
 					}
 
