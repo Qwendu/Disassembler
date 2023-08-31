@@ -175,10 +175,28 @@ finish :: (using plugin : *Plugin)
 	}
 
 	
-	for *builders
+	if procedures_to_disassemble.count != 0
 	{
-		file_path := tprint("%/%", base_folder, assembly_files[it_index]);
-		write_entire_file(file_path,it, do_reset = true);
+		for *builders
+		{
+			file_path := tprint("%/%", base_folder, assembly_files[it_index]);
+			if !it.initialized
+			{
+				if file_exists(file_path)
+				{
+					// Avoid confusing the user, when they recompile and removed
+					//  an annotation, but they still see the disassembly of a 
+					//  previous compilation
+					file_delete(file_path);
+					log("Deleting file % because we are not writing to it in this build", file_path);
+				}
+				continue;
+			}
+			
+
+
+			write_entire_file(file_path,it, do_reset = true);
+		}
 	}
 }
 
@@ -356,3 +374,4 @@ Jai :: #import "Compiler";
 Zydis :: #import,dir "jai-zydis";
 #import "File";
 #import "Sort";
+#import "File_Utilities";
