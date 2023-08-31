@@ -1,5 +1,6 @@
 // run with jai example.jai -plug Disassembler
 
+global : int;
 
 foo :: () -> int
 {
@@ -38,6 +39,10 @@ bar :: () -> int
 baz :: () -> int
 {
 	return 3;
+} @Disassemble
+
+boo :: ()
+{
 } @Disassemble
 
 main :: ()

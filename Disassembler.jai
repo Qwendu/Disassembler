@@ -63,6 +63,10 @@ finish :: (using plugin : *Plugin)
 					address = proc.runtime_address,
 					name    = proc.symbol_name, 
 				});
+				array_add(*labels, .{
+					address = proc.runtime_address,
+					name    = proc.symbol_name, 
+				});
 
 
 				str : [] u8;
@@ -121,7 +125,6 @@ finish :: (using plugin : *Plugin)
 			quick_sort(proc.labels,  a => a.address);
 			// Deduplicate entries
 			{
-				for proc.labels  log("%", it.name);
 				last_idx  := 0;
 				for 1..proc.labels.count-1
 				{
@@ -131,7 +134,7 @@ finish :: (using plugin : *Plugin)
 						proc.labels[last_idx] = proc.labels[it];
 					}
 				}
-				for proc.labels  log("%", it.name);
+				proc.labels.count = last_idx + 1;
 			}
 
 			{
