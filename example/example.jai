@@ -23,6 +23,12 @@ bar :: () -> int
 		{
 			a += b * 2;
 		}
+		if a > 2
+		{
+			a += 1;
+		}else{
+			a -= 1;
+		}
 	}
 	
 	return b - a;

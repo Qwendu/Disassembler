@@ -119,6 +119,20 @@ finish :: (using plugin : *Plugin)
 			}
 
 			quick_sort(proc.labels,  a => a.address);
+			// Deduplicate entries
+			{
+				for proc.labels  log("%", it.name);
+				last_idx  := 0;
+				for 1..proc.labels.count-1
+				{
+					if proc.labels[last_idx].address != proc.labels[it].address
+					{
+						last_idx += 1;
+						proc.labels[last_idx] = proc.labels[it];
+					}
+				}
+				for proc.labels  log("%", it.name);
+			}
 
 			{
 				addr := proc.runtime_address;
@@ -221,7 +235,7 @@ message :: (using plugin : *Plugin, msg : *Jai.Message)
 							name = it.expression.name,
 							file_index = file_index
 						});
-						log("Disassembling procedure %, putting it in file %", it.expression.name, file_name);
+						log("Disassembling procedure %, putting it in file %", it.expression.name, assembly_files[file_index]);
 						break note;
 					}
 
